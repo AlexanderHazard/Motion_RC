@@ -13,13 +13,16 @@ HotKeys::~HotKeys()
 }
 
 
-void HotKeys::run()
+void HotKeys::key_action_run()
 {
-    enum{ONE_KEYID = 1, SECOND_KEY_ID = 2, THIRD_KEY_ID = 3};
+    enum{F1_KEYID = 1, F4_KEYID = 2, F5_KEYID = 3, F6_KEYID = 4, F7_KEYID};
 
-    RegisterHotKey(0, ONE_KEYID, 0, VK_F3);
-    RegisterHotKey(0, SECOND_KEY_ID, 0, VK_F1);
-    //RegisterHotKey(0, THIRD_KEY_ID, 0, VK_F6);
+    RegisterHotKey(0, F1_KEYID, 0, VK_F1);
+    RegisterHotKey(0, F4_KEYID, 0, VK_F4);
+    RegisterHotKey(0, F5_KEYID, 0, VK_F5);
+    RegisterHotKey(0, F6_KEYID, 0, VK_F6);
+    RegisterHotKey(0, F7_KEYID, 0, VK_F7);
+
 
     MSG msg;
     while(!quit)
@@ -27,15 +30,29 @@ void HotKeys::run()
         GetMessage(&msg,0,0,0);
         if(msg.message == WM_HOTKEY)
         {
-           if(msg.wParam == 1)
+           if(msg.wParam == F4_KEYID)
              {//qDebug() << "hot key";
-               emit hotKeyPressed();
-               //keybd_event(VK_F5, 0xBF, 0, 0);//push
-               //keybd_event(VK_F5, 0xBF, KEYEVENTF_KEYUP, 0);//release
+               emit F4KeyPressed();
              }
 
-           if(msg.wParam == 2)
+           if(msg.wParam == F5_KEYID)
+             {//qDebug() << "hot key";
+               emit F5KeyPressed();
+             }
+
+           if(msg.wParam == F6_KEYID)
+             {//qDebug() << "hot key";
+               emit F6KeyPressed();
+             }
+
+           if(msg.wParam == F7_KEYID)
+             {//qDebug() << "hot key";
+               emit F7KeyPressed();
+             }
+
+           if(msg.wParam == F1_KEYID)
              {
+
                //qDebug() << "break";
                break;
              }

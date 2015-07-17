@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <qmath.h>
 #include <QFile>
+#include <QThreadPool>
 
 Form::Form(QWidget *parent) :
     QMainWindow(parent),
@@ -25,7 +26,7 @@ Form::Form(QWidget *parent) :
 
     //make initialization of tcp transaction between Car and PC
     ptcpClient = new QTcpSocket(this);
-    imuClient = new IMU_Tcp_Client("192.168.88.44", 5555, ptcpClient);
+    imuClient = new IMU_Tcp_Client("192.168.55.101", 5555, ptcpClient);
 
     //make initialization of udp transaction between PC and Motion Platform
     pudpClient = new QUdpSocket(this);
@@ -41,28 +42,47 @@ Form::Form(QWidget *parent) :
 
 
     //gui
-    //change motion platform control mode
+    //change motion platform control mode (hand, imu from car)
     connect(ui->controlBtn, SIGNAL(clicked()), this, SLOT(changePlatformControl()));
 
-    //speed limit changes
-    ui->speedSpin->setEnabled(false);
-    connect(ui->speedSlider, SIGNAL(valueChanged(int)), ui->speedSpin, SLOT(setValue(int)));
-    connect(ui->speedSlider, SIGNAL(valueChanged(int)), this, SLOT(speedChange(int)));//change limit speed
-
     //changes for settings
-    connect(ui->comboMotMode, SIGNAL(currentIndexChanged(int)), this, SLOT(motionModeChange(int)));//change motiom mode
-    connect(ui->defContBox, SIGNAL(currentIndexChanged(int)), this, SLOT(motionControlChange(int)));//void motContChange(int);//change motion control
-    connect(ui->autoCheck, SIGNAL(stateChanged(int)), this, SLOT(autoStartChange(int)));
+    connect(ui->motionSlider, SIGNAL(valueChanged(int)), this, SLOT(motionSensChange(int)));//change motiom mode
 
     //
     connect(ui->runButton, SIGNAL(clicked()), this, SLOT(changePlatformState()));
     connect(ui->motionConnectBtn, SIGNAL(clicked()), this, SLOT(connectToPlatform()));
+
+    //hot keys
+    hotKeyObject = new HotKeys();//exaplar of hot key class
+    hotKeyThread = new QThread();//thread from hot key heaper
+     //push keyobject to thread
+    hotKeyObject->moveToThread(hotKeyThread);
+    connect(hotKeyThread, SIGNAL(started()), hotKeyObject, SLOT(key_action_run()));
+    connect(hotKeyThread, SIGNAL(finished()), hotKeyObject, SLOT(deleteLater()));
+
+    hotKeyThread->start();
+
+      //connect signals from key heaper to slots
+    connect(hotKeyObject, SIGNAL(F4KeyPressed()), this, SLOT(F4Click()));
+    connect(hotKeyObject, SIGNAL(F5KeyPressed()), this, SLOT(F5Click()));
+    connect(hotKeyObject, SIGNAL(F6KeyPressed()), this, SLOT(F6Click()));
+    connect(hotKeyObject, SIGNAL(F7KeyPressed()), this, SLOT(F7Click()));
+
+
+    //audio effects
+    engineAudio = new AudioEffects();
+    audioThread = new QThread();
+
+    engineAudio->moveToThread(audioThread);
+    connect(audioThread, SIGNAL(started()), engineAudio, SLOT(BassAudioProcess()));
+    connect(audioThread, SIGNAL(finished()), engineAudio, SLOT(deleteLater()));
 }
 
 Form::~Form()
 {
     delete ui;
     delete gamePad;
+    hotKeyThread->deleteLater();
 }
 
 void Form::gamePadNewState(DIJOYSTATE2 gamePadState)
@@ -78,6 +98,7 @@ void Form::gamePadNewState(DIJOYSTATE2 gamePadState)
       speedB = fabs((MAX_SPEED/FULL_ROTATION_ANGLE) * (js.lRz - FULL_ROTATION_ANGLE/2));
       speedR = speedF - speedB;//detect the result speed
       //qDebug() << "speed = " << speedR;
+      if(speedR > speedLimit) speedR = speedLimit;
 
     /*converting speed value to PWM*/
       speed_pwm_value = (PWM_MAX_SHIFT/MAX_SPEED) * speedR;
@@ -90,6 +111,9 @@ void Form::gamePadNewState(DIJOYSTATE2 gamePadState)
      rotation_angle = js.lX;
      rotation_pwm_value = (PWM_MAX_SHIFT/(FULL_ROTATION_ANGLE/2)) * rotation_angle;
 
+   /*audio effects*/
+     audioChange();
+    speedPrev = speedR;
    /*qDebug() << "AXIS AX =" << js.lAX << "AXIS AY =" << js.lAY << "AXIS AZ =" << js.lAZ;
 
    qDebug() << "AXIS RX =" << js.lRx << "AXIS RY =" << js.lRy << "AXIS RZ =" << js.lRz;
@@ -120,6 +144,7 @@ void Form::imuConnectSucc()
 {
   ui->carConnLabel->setText("<font color=\"green\">Connected!</font>");
   qDebug() << "Connection OK";
+  isCarConnect = true;
 
   int dataToSend[2];
     dataToSend[0] = rotation_pwm_value;
@@ -132,6 +157,8 @@ void Form::imuConnectErr()
 {
   ui->carConnLabel->setText("<font color=\"red\">Not connected!</font>");
   qDebug() << "Connection Missed";
+  isCarConnect = false;
+  changePlatformControl();//switch to hand mode
 }
 
 //procedures and functions for working with imu data
@@ -139,6 +166,7 @@ void Form::convertImuToMotion()
 {
    convertAngleIMU();
    convertRightLeftImu();
+   convertBackImu();
 }
 
 void Form::convertAngleIMU()
@@ -152,27 +180,28 @@ void Form::convertAngleIMU()
 
         //if step of angle more then 100 grad
         /*
-         * for example prev_angle = 1 and new_angle = -172, for this condition
-         * we make next new_angle = -180 - (-172) = -8, now we calculate our shift
-         * shift_angle = 1 - (-8) = 9, so we have clockwise rotation on 8 grade
+         * for example prev_angle = 178 and new_angle = -172, for this condition
+         * new_angle - prev_angle = -350, so
+         * we make next new_angle = 180 + (180 - 172) = 188, now we calculate our shift
+         * shift_angle = 188 - 178 = 10, so we have clockwise rotation on 10 grade
          */
-        if((prev_angle - new_angle) < -100) new_angle = -180 - new_angle;
-        else if((prev_angle - new_angle) > 100) new_angle = 180 + new_angle;
+          qDebug() << new_angle;
 
-        shift_angle = prev_angle - new_angle;//calculate shift and direction of ritation
+        if((new_angle - prev_angle) < -100) new_angle = 180 + (180 + new_angle);
+        else if((new_angle - prev_angle) > 100) new_angle = -180 + (new_angle - 180);
+
+        shift_angle = new_angle - prev_angle;//calculate shift and direction of ritation
 
         //calculate current angle
         //we add new shift to angle on each step
-        current_angle += shift_angle;
-
-        //check if angle not more or little then limiting values of angle in platform
-        if(current_angle >= (int)PLATFORM_MAX_ANGLE)  current_angle = (int)PLATFORM_MAX_ANGLE;
-        else if(current_angle <= (int)(-1 * PLATFORM_MAX_ANGLE))  current_angle = (int)(-1 * PLATFORM_MAX_ANGLE);
+        //check if current angle not gone abroad
+        if (((current_angle + shift_angle) < PLATFORM_MAX_ANGLE) && ((current_angle + shift_angle) > PLATFORM_MIN_ANGLE))
+             current_angle += shift_angle;
 
         //converting data to motion viev
         angle  = (current_angle * ROTATION_STEP) + start_motion_angle;
 
-        //qDebug() << angle << current_angle << prev_angle << new_angle;
+        qDebug() << angle << current_angle << prev_angle << new_angle;
         ui->angleSlider->setValue(angle);
 
         prev_angle = new_angle;//save current angle
@@ -227,22 +256,11 @@ void Form::convertBackImu()
 //game settings
 void Form::setAppSettings()
 {
-    switch(cMotionMode)
-    {
-       case Low: PLATFORM_MAX_RLB = 90;//set low step for 1 grad
-                 break;
+    PLATFORM_MAX_RLB = cMotionSensitivity;
+    ui->spinMotBox->setValue(PLATFORM_MAX_RLB);
 
-       case Medium: PLATFORM_MAX_RLB = 45;//set medium step for 1 grad
-                break;
-
-       case High: PLATFORM_MAX_RLB = 30;//set hard step for 1 grad
-                 break;
-
-    }
     PLATFORM_RLB_STEP = PLATFORM_MAX_RLB_VALUE/PLATFORM_MAX_RLB;//set step for right left and back value for motion platform
 
-    //set speed limit
-    speedLimit = ui->speedSpin->value();
 }
 
 
@@ -255,68 +273,40 @@ void Form::loadSettings()
 
    QSettings settings(configFile, QSettings::IniFormat);
 
-          settings.beginGroup("Car");
-           speedLimit = settings.value("speed","").toInt();
-          settings.endGroup();
-
           settings.beginGroup("Game");
-           cMotionMode = (motionMode)settings.value("motion_mode","").toInt();
-           motionContMode = (motionControlMode)settings.value("default_control", "").toInt();
-           autostart = settings.value("autostart", "").toBool();
+           cMotionSensitivity = settings.value("motion_sens","").toInt();
           settings.endGroup();
   }
-     //show this on gui
-          ui->speedSlider->setValue(speedLimit);
-          ui->comboMotMode->setCurrentIndex(cMotionMode);
-          ui->defContBox->setCurrentIndex(motionContMode);
-          ui->autoCheck->setChecked(autostart);
+
+          //ui->comboMotMode->setCurrentIndex(cMotionMode);
+          ui->motionSlider->setValue(cMotionSensitivity);
 }
 
 void Form::saveSettings()
 {
     QSettings settings(configFile, QSettings::IniFormat);
-               settings.beginGroup("Car");
-               settings.setValue("speed", speedLimit);
-              settings.endGroup();
-
-             settings.beginGroup("Game");
-               settings.setValue("motion_mode", cMotionMode);
-               settings.setValue("default_control", motionContMode);
-               settings.setValue("autostart", autostart);
-             settings.endGroup();
+      settings.beginGroup("Game");
+         settings.setValue("motion_mode", cMotionSensitivity);
+       settings.endGroup();
 }
 
 
-//change limit speed
-void Form::speedChange(int val)
+
+
+//change motion mode if we change sensitivity
+void Form::motionSensChange(int val)
 {
-    speedLimit = val;
+    cMotionSensitivity = val;
+    setAppSettings();
 }
 
-//change motion mode
-void Form::motionModeChange(int val)
-{
-    cMotionMode = (motionMode) val;
-}
-
-//change motion control
-void Form::motionControlChange(int val)
-{
-    motionContMode = (motionControlMode) val;
-}
-
-//cahange auto start value
-void Form::autoStartChange(int val)
-{
-    if(val) autostart = true;
-    else autostart = false;
-}
 
 void Form::changePlatformControl()
 {
    //here we change mode of motion platform control
     /*we can contron him by hand mode
      * and also we can send data from IMU to HIM
+     * Dont work if
     */
     if(motionContMode == Imu)
       {
@@ -354,7 +344,7 @@ void Form::changePlatformControl()
         connect(imuClient, SIGNAL(connectError()), this, SLOT(imuConnectErr()));
         imuClient->startConnection();
       }
-}
+ }
 
 //changing motion values(only in Hand Mode)
 void Form::angleChange(int val)
@@ -402,7 +392,81 @@ void Form::motionAnswer(int *data)
    ui->rightEdit->setText(QString::number(data[0]));
    ui->leftEdit->setText(QString::number(data[1]));
    ui->backEdit->setText(QString::number(data[2]));
+
+   if(motionContMode == Demo) demoPlatform();//demo shift calculation
+
    platformClient->writeDatagramm(motionState, angle, right, left, back);
+}
+
+void Form::demoPlatform()
+{
+  if(!isDemo)
+  {
+    if(motionState == Platform_Run)//stop platform if it run
+     {
+        changePlatformState();
+     }
+    leftDirect = DownDir;
+    rightDirect = StopDir;
+    backDirect = StopDir;
+    ui->leftSlider->setValue(294);//left slider to the middle
+    ui->rightSlider->setValue(294);//right slider to the middle
+    ui->backSlider->setValue(294);//back slider to the middle
+    changePlatformState();//enable platform
+    isDemo = true;
+  }
+
+int left = ui->leftSlider->value();
+int right = ui->rightSlider->value();
+int back = ui->backSlider->value();
+
+  if(left == 100) leftDirect = UpDir;
+  if(left == 580) leftDirect = DownDir;
+
+  if(right == 100) rightDirect = UpDir;
+  if(right == 580) rightDirect = DownDir;
+
+  if(back == 100) backDirect = UpDir;
+  if(back == 580) backDirect = DownDir;
+
+
+
+  if(leftDirect == UpDir)
+    {
+      ui->leftSlider->setValue(++left);//to up
+    }
+  else if(leftDirect == DownDir)
+    {
+      ui->leftSlider->setValue(--left);//to down
+    }
+
+  if(rightDirect == UpDir)
+    {
+      ui->rightSlider->setValue(++right);//to up
+    }
+  else if(rightDirect == DownDir)
+    {
+     ui->rightSlider->setValue(--right);//to down
+    }
+  else if((rightDirect == StopDir) && (left < 150))
+    {
+       rightDirect = DownDir;
+    }
+
+  if(backDirect == UpDir)
+    {
+      ui->backSlider->setValue(++back);//to up
+    }
+  else if(backDirect == DownDir)
+    {
+      ui->backSlider->setValue(--back);//to down
+    }
+  else if((backDirect == StopDir) && ( right < 150))
+    {
+       backDirect = DownDir;
+    }
+  qDebug() << left << right << back;
+
 }
 
 //platform states
@@ -419,4 +483,78 @@ void Form::changePlatformState()
         motionState = Platform_Stop;
         ui->runButton->setText("Run");
       }
+}
+
+
+//hot keys slots
+//connect to platform with hot key
+void Form::F4Click()
+{
+    qDebug() <<"F4";
+    connectToPlatform();
+}
+//change motion platform(Run, Stop) mode with hot key
+void Form::F5Click()
+{
+    qDebug() <<"F5";
+    changePlatformState();
+}
+
+
+void Form::F6Click()
+{
+    qDebug() << "F6";
+    if(isDemo == false)
+     {//enable and disable demo
+      ui->motionGroup->setEnabled(false);//disable motion sliders
+      motionContMode = Demo;
+      imuClient->tcpCloseConnection();//close connection
+
+      //disconnect signals from socket handler
+      disconnect(imuClient, SIGNAL(tcpDataReady(int*)), this, SLOT(imuDataRead(int*)));
+      disconnect(imuClient, SIGNAL(connectSuccess()), this, SLOT(imuConnectSucc()));
+      disconnect(imuClient, SIGNAL(connectError()), this, SLOT(imuConnectErr()));
+
+      /*connect sliders changes to motion values changes*/
+      connect(ui->angleSlider, SIGNAL(valueChanged(int)), this, SLOT(angleChange(int)));
+      connect(ui->rightSlider, SIGNAL(valueChanged(int)), this, SLOT(rightChange(int)));
+      connect(ui->leftSlider, SIGNAL(valueChanged(int)), this, SLOT(leftChange(int)));
+      connect(ui->backSlider, SIGNAL(valueChanged(int)), this, SLOT(backChange(int)));
+    }
+    else
+    {
+        isDemo = false;//clear demo flag
+        changePlatformState();//disable platform
+        motionContMode = Hand;//change mode flag to hand
+    }
+}
+
+void Form::F7Click()
+{
+    qDebug() << "F7";
+    //change platform control(from imu sensors or by hand )
+    changePlatformControl();
+}
+
+//change audio track
+void Form::audioChange()
+{
+ //set track for start at the beginning
+ // if(isCarConnect)
+  {
+    if((currentEffect == None))
+      {
+        //engineAudio->FoneAudioEffect();
+        audioThread->start();
+        currentEffect = Fone;
+      }
+
+    if(speedR > 0)
+      {
+
+        currentEffect = Run;
+        engineAudio->RunSpeed(speedR);
+      }
+    //else if(speedR == 0 && currentEffect != Down && currentEffect != Fone) {engineAudio->SpeedDnAudioEffect(); currentEffect = Down;}
+  }
 }

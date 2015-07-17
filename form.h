@@ -7,10 +7,13 @@
 #include<QUdpSocket>
 #include <QSettings>
 #include <QtTest/QTest>
+#include <QThread>
 
 #include "qt_direct_input.h"
 #include "imu_tcp_client.h"
 #include "motionudp.h"
+#include "audioeffects.h"
+#include "hotkeys.h"
 
 
 namespace Ui {
@@ -44,10 +47,11 @@ private:
     int Angle = 0, Yaw = 0, Pitch = 0, Roll = 0;
 
 
-    int speedLimit = 25;//limit of car speed in km/h
+    int speedLimit = 60;//limit of car speed in km/h
     float speedF = 0;//speed forward
     float speedB = 0;//speed back
     float speedR = 0;//speed result
+    float speedPrev = 0;//speed on previous step
 
     int rotation_angle = 0;
 
@@ -59,12 +63,12 @@ private:
     float FULL_ROTATION_ANGLE = 180.0f;
 
     //motion control mode
-    enum motionControlMode{Hand, Imu};
+    enum motionControlMode{Hand, Imu, Demo};
     motionControlMode motionContMode = Hand;
 
     //motion modes enumeration
-    enum motionMode{Low, Medium, High};
-    motionMode cMotionMode = Low;//value for current Motion Mode
+    //enum motionMode{Low, Medium, High};
+    unsigned int cMotionSensitivity = 90;//value for current Motion Mode 90 down to 5
 
     //motion platform running
     enum platformState{Platform_Stop, Platform_Run};
@@ -78,6 +82,7 @@ private:
 
     //rotation parameters
     float PLATFORM_MAX_ANGLE = 135.0f;//max angle of motion platform rotation
+    float PLATFORM_MIN_ANGLE = -135.0f;//max angle of motion platform rotation
     float PLATFORM_MAX_ANGLE_VALUE = 244.0f;//max value of platform rotation
     #define ROTATION_STEP PLATFORM_MAX_ANGLE_VALUE/PLATFORM_MAX_ANGLE //step platform grad by imu
 
@@ -101,19 +106,14 @@ private:
  void saveSettings();
  void loadSettings();
  void setAppSettings();
- bool autostart = false;//automation start all connections
 
 
 
 private slots:
    //gui changes
-   void speedChange(int);//change limit speed
-   void motionModeChange(int);//change motion mode
-   void motionControlChange(int);//change motion control
-   void autoStartChange(int);//change auto start
+   void motionSensChange(int);//change motion mode
 
-
-   //-------------------
+   //------------------- answer from motion platform
    void motionAnswer(int*);
 
    //platform
@@ -131,11 +131,41 @@ private slots:
    void leftChange(int);
    void backChange(int);
 
-   //connect betveen
+   //demo mode for motion platform
+   void demoPlatform();
+
+   //connect between
     void imuDataRead(int* dataRead);
     void imuConnectSucc();
     void imuConnectErr();
 
+public:
+    //hot keys actions
+    HotKeys *hotKeyObject;
+    QThread *hotKeyThread;
+
+public slots:
+    void F4Click();
+    void F5Click();
+    void F6Click();
+    void F7Click();
+
+private:
+    //connectin to CAR status
+    bool isCarConnect = false;
+    //demo mode status
+    bool isDemo = false;
+
+    typedef enum{UpDir, StopDir, DownDir} axisDirection;//using only in demo mode
+    axisDirection leftDirect = DownDir, rightDirect = DownDir, backDirect = DownDir;
+    int demoFreq = 0;
+
+    //audio effects
+    void audioChange();//change audio track
+    enum AudioEffectState{None, Fone, Run};
+    AudioEffectState currentEffect = None;
+    AudioEffects *engineAudio;
+    QThread *audioThread;
 };
 
 #endif // FORM_H
