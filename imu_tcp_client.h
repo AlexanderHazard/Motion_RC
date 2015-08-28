@@ -5,6 +5,7 @@
 #include <QTcpSocket>
 #include <QTime>
 #include <QtEndian>
+#include <QDataStream>
 
 class IMU_Tcp_Client : public QObject
 {

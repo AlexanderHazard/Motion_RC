@@ -15,6 +15,9 @@
 #include "audioeffects.h"
 #include "hotkeys.h"
 
+#include <QCamera>
+#include <QCameraInfo>
+
 
 namespace Ui {
 class Form;
@@ -166,6 +169,11 @@ private:
     AudioEffectState currentEffect = None;
     AudioEffects *engineAudio;
     QThread *audioThread;
+
+    //show video from camera
+    QGraphicsVideoItem *videoItem;
+    QCamera *camera;
+
 };
 
 #endif // FORM_H

@@ -3,6 +3,7 @@
 
 #include <QUdpSocket>
 #include <QObject>
+#include <QDataStream>
 
 class MotionUdp : public QObject
 {

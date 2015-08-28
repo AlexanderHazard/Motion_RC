@@ -4,6 +4,9 @@
 #include <qmath.h>
 #include <QFile>
 #include <QThreadPool>
+#include <QCameraViewfinder>
+//#include <QCameraViewfinderSettings>
+#include <QGraphicsVideoItem>
 
 Form::Form(QWidget *parent) :
     QMainWindow(parent),
@@ -26,7 +29,7 @@ Form::Form(QWidget *parent) :
 
     //make initialization of tcp transaction between Car and PC
     ptcpClient = new QTcpSocket(this);
-    imuClient = new IMU_Tcp_Client("192.168.55.101", 5555, ptcpClient);
+    imuClient = new IMU_Tcp_Client("192.168.1.101", 5555, ptcpClient);
 
     //make initialization of udp transaction between PC and Motion Platform
     pudpClient = new QUdpSocket(this);
@@ -76,6 +79,39 @@ Form::Form(QWidget *parent) :
     engineAudio->moveToThread(audioThread);
     connect(audioThread, SIGNAL(started()), engineAudio, SLOT(BassAudioProcess()));
     connect(audioThread, SIGNAL(finished()), engineAudio, SLOT(deleteLater()));
+
+
+    //video capture
+
+    /*videoItem = new QGraphicsVideoItem();
+    QGraphicsScene *scene = new QGraphicsScene();
+    QVideoWidget *widget = new QVideoWidget();
+    ui->graphicsView->setScene(scene);
+    scene->addWidget(widget);*/
+    ui->widget->setAspectRatioMode(Qt::IgnoreAspectRatio);
+    //ui->graphicsView->scene()->addItem(videoItem);
+
+    //ui->widget->setFullScreen(true);
+    QList<QCameraInfo> cameras = QCameraInfo::availableCameras();
+    foreach (const QCameraInfo &cameraInfo, cameras) {
+       // if (QString::compare(cameraInfo.description(), "AVerMedia BDA Analog Capture", Qt::CaseInsensitive) == 0)
+        {
+            qDebug() << cameraInfo.description();
+            camera = new QCamera(cameraInfo);
+            camera->setViewfinder(ui->widget);
+            camera->setCaptureMode(QCamera::CaptureVideo);
+            camera->start();
+
+        }
+
+     }
+
+//Regular expression
+    QRegExp re("([0-9]{1,3}[\.]){3}[0-9]{1,3}[:][0-9]{1,4}");
+    QRegExpValidator *validator = new QRegExpValidator(re, this);
+    ui->lineEdit->setValidator(validator);
+
+
 }
 
 Form::~Form()
@@ -201,7 +237,7 @@ void Form::convertAngleIMU()
         //converting data to motion viev
         angle  = (current_angle * ROTATION_STEP) + start_motion_angle;
 
-        qDebug() << angle << current_angle << prev_angle << new_angle;
+        qDebug() << "ANGLE" << angle << "CURRENT ANGLE" << current_angle << "PREV ANGLE" << prev_angle << "NEW ANGLE" << new_angle;
         ui->angleSlider->setValue(angle);
 
         prev_angle = new_angle;//save current angle
@@ -221,8 +257,8 @@ void Form::convertRightLeftImu()
 
     current_rl = PLATFORM_RLB_STEP * Roll;//calculate current right left value
     //convert to motion view
-    left = start_motion_left + current_rl;
-    right = start_motion_right - current_rl;
+    left = start_motion_left - current_rl;
+    right = start_motion_right + current_rl;
 
     //show on gui
     ui->leftSlider->setValue(left);
@@ -243,7 +279,7 @@ void Form::convertBackImu()
     current_back = PLATFORM_RLB_STEP * Pitch;//calculate current back value
 
     //convert to motion view
-    back = start_motion_back + current_back;
+    back = start_motion_back - current_back;
 
     //show on
     ui->backSlider->setValue(back);
